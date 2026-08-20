@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "graft": {
-      "command": "npx",
+      "command": "C:\\nvm4w\\nodejs\\npx.cmd",
       "args": [
         "-y",
         "@nanonets/graft",
