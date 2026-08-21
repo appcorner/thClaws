@@ -1681,6 +1681,12 @@ impl ProjectConfig {
         if let Some(ref f) = self.openrouter_fusion {
             config.openrouter_fusion = f.clone();
         }
+        if let Some(ref family) = self.font_family {
+            config.font_family = family.clone();
+        }
+        if let Some(size) = self.font_size {
+            config.font_size = size;
+        }
     }
 
     pub fn set_model(&mut self, model: &str) {
@@ -1784,6 +1790,18 @@ impl ProjectConfig {
     /// Set custom font size for the UI. 0 = system default, 8–32 allowed.
     pub fn set_font_size(&mut self, size: u32) {
         self.font_size = Some(size);
+    }
+
+    /// Resolve the project-scoped font fields independently, falling back to
+    /// the already-resolved application config only when this project has not
+    /// set that individual field.
+    pub fn font_settings_or(&self, fallback: &AppConfig) -> (String, u32) {
+        (
+            self.font_family
+                .clone()
+                .unwrap_or_else(|| fallback.font_family.clone()),
+            self.font_size.unwrap_or(fallback.font_size),
+        )
     }
 
     /// Load project-level MCP servers. Checks (in order):
@@ -2925,6 +2943,40 @@ mod tests {
         let loaded: ProjectConfig = serde_json::from_str(&contents).unwrap();
         assert_eq!(loaded.model.as_deref(), Some("gpt-4o"));
         assert_eq!(loaded.max_tokens, Some(4096));
+    }
+
+    #[test]
+    fn project_font_settings_apply_to_app_config() {
+        let project: ProjectConfig =
+            serde_json::from_str(r#"{"fontFamily":"Fira Code, monospace","fontSize":16}"#).unwrap();
+        let mut config = AppConfig::default();
+
+        project.apply_to(&mut config);
+
+        assert_eq!(config.font_family, "Fira Code, monospace");
+        assert_eq!(config.font_size, 16);
+    }
+
+    #[test]
+    fn project_font_settings_fall_back_per_field() {
+        let fallback = AppConfig {
+            font_family: "system-ui, sans-serif".into(),
+            font_size: 14,
+            ..Default::default()
+        };
+        let project = ProjectConfig {
+            font_family: Some("Fira Code, monospace".into()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            project.font_settings_or(&fallback),
+            ("Fira Code, monospace".into(), 14),
+        );
+        assert_eq!(
+            ProjectConfig::default().font_settings_or(&fallback),
+            ("system-ui, sans-serif".into(), 14),
+        );
     }
 
     #[test]

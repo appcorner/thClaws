@@ -862,6 +862,16 @@ export default function App() {
         send({ type: "shell_tab_enabled_get" });
         send({ type: "browser_status_get" });
         send({ type: "font_config_get" });
+      } else if (msg.type === "cwd_changed" && msg.ok === true) {
+        // This listener is already mounted behind StartupModal, so its
+        // initial font request can have read the launcher directory's
+        // defaults. set_cwd changes the process cwd before broadcasting
+        // this event; fetch again now so the Chat UI applies the newly
+        // selected project's font without requiring Settings to open.
+        send({ type: "team_enabled_get" });
+        send({ type: "shell_tab_enabled_get" });
+        send({ type: "browser_status_get" });
+        send({ type: "font_config_get" });
       } else if (msg.type === "initial_state") {
         // #95(c) + #168: the explicit `*_get` requests below race the WS
         // CONNECTING state on first mount in --serve mode — wsSend drops

@@ -5183,23 +5183,32 @@ pub fn handle_ipc(msg: Value, ctx: &IpcContext) -> bool {
         }
 
         "font_config_get" => {
-            let cfg = crate::config::AppConfig::load().unwrap_or_default();
+            // Prefer values explicitly saved for this project; inherit the
+            // effective application settings only for fields absent from the
+            // project config. Saving remains project-scoped below.
+            let project = crate::config::ProjectConfig::load().unwrap_or_default();
+            let app = crate::config::AppConfig::load().unwrap_or_default();
+            let (font_family, font_size) = project.font_settings_or(&app);
             let payload = serde_json::json!({
                 "type": "font_config",
-                "fontFamily": cfg.font_family,
-                "fontSize": cfg.font_size,
+                "fontFamily": font_family,
+                "fontSize": font_size,
             });
             (ctx.dispatch)(payload.to_string());
         }
 
         "font_config_set" => {
-            let font_family = msg.get("fontFamily").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let font_family = msg
+                .get("fontFamily")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
             let font_size = msg.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            
+
             let mut cfg = crate::config::ProjectConfig::load().unwrap_or_default();
             cfg.set_font_family(font_family.clone());
             cfg.set_font_size(font_size);
-            
+
             let (ok, error) = match cfg.save() {
                 Ok(()) => (true, String::new()),
                 Err(e) => (false, e.to_string()),

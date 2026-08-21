@@ -1381,6 +1381,7 @@ function FontSettingsSection() {
   const [fontSize, setFontSize] = useState(0);
   const [draft, setDraft] = useState({ fontFamily: "", fontSize: 0 });
   const [flash, setFlash] = useState<{ ok: boolean; msg: string } | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const unsub = subscribe((msg) => {
@@ -1391,6 +1392,7 @@ function FontSettingsSection() {
         setFontSize(size);
         setDraft({ fontFamily: family, fontSize: size });
         if (msg.type === "font_config_result") {
+          setSaving(false);
           if (msg.ok) {
             setFlash({ ok: true, msg: "Font settings saved" });
           } else {
@@ -1405,6 +1407,8 @@ function FontSettingsSection() {
   }, []);
 
   const handleSave = () => {
+    if (saving) return;
+    setSaving(true);
     send({
       type: "font_config_set",
       fontFamily: draft.fontFamily,
@@ -1469,16 +1473,16 @@ function FontSettingsSection() {
         </div>
         <button
           onClick={handleSave}
-          disabled={unchanged}
+          disabled={unchanged || saving}
           className="px-3 py-1 text-xs rounded self-start"
           style={{
-            background: unchanged ? "var(--bg-secondary)" : "var(--accent)",
-            color: unchanged ? "var(--text-secondary)" : "var(--accent-fg)",
-            cursor: unchanged ? "not-allowed" : "pointer",
-            opacity: unchanged ? 0.5 : 1,
+            background: unchanged || saving ? "var(--bg-secondary)" : "var(--accent)",
+            color: unchanged || saving ? "var(--text-secondary)" : "var(--accent-fg)",
+            cursor: unchanged || saving ? "not-allowed" : "pointer",
+            opacity: unchanged || saving ? 0.5 : 1,
           }}
         >
-          Save
+          {saving ? "Saving…" : "Save"}
         </button>
       </div>
       <FlashLine flash={flash ?? undefined} />
