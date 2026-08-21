@@ -441,7 +441,15 @@ export function FilesView({ active }: Props) {
         }
         // Late response for a file the pane has already navigated away
         // from — drop it instead of letting it overwrite the current one.
-        if (requestedPathRef.current && incomingPath !== requestedPathRef.current) {
+        // The Windows IPC backend normalizes request paths to `\\` before
+        // echoing them in `file_content`, while markdown links resolve with
+        // `/`. Compare a separator-normalized form so a valid linked-file
+        // response is not mistaken for a late response.
+        if (
+          requestedPathRef.current &&
+          incomingPath.replace(/\\/g, "/") !==
+            requestedPathRef.current.replace(/\\/g, "/")
+        ) {
           return;
         }
         const incomingReadMode: ReadMode =
