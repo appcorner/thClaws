@@ -145,6 +145,9 @@ pub enum ProviderKind {
     /// request. Key `GROQ_API_KEY` (shared with the whisper
     /// transcription path in `tools/watch_video.rs`).
     Groq,
+    /// MaxPlus AI — OpenAI- and Anthropic-compatible pay-as-you-go API.
+    /// Models route via the `maxplus/<id>` prefix and use `MAXPLUS_API_KEY`.
+    MaxPlus,
 }
 
 /// Two-tier provider classification.
@@ -285,6 +288,7 @@ impl ProviderKind {
         Self::Moonshot,
         Self::XAi,
         Self::Groq,
+        Self::MaxPlus,
     ];
 
     pub fn name(&self) -> &'static str {
@@ -320,6 +324,7 @@ impl ProviderKind {
             Self::Moonshot => "moonshot",
             Self::XAi => "xai",
             Self::Groq => "groq",
+            Self::MaxPlus => "maxplus",
         }
     }
 
@@ -436,6 +441,7 @@ impl ProviderKind {
             // the LPU cloud. The `groq/` prefix is stripped before the
             // upstream request.
             Self::Groq => "groq/llama-3.3-70b-versatile",
+            Self::MaxPlus => "maxplus/claude-sonnet-4-6",
         }
     }
 
@@ -467,6 +473,7 @@ impl ProviderKind {
             Self::Moonshot => Some("MOONSHOT_BASE_URL"),
             Self::XAi => Some("XAI_BASE_URL"),
             Self::Groq => Some("GROQ_BASE_URL"),
+            Self::MaxPlus => Some("MAXPLUS_BASE_URL"),
             _ => None,
         }
     }
@@ -487,6 +494,7 @@ impl ProviderKind {
                 | Self::LiteLlm
                 | Self::AzureAIFoundry
                 | Self::OpenAICompat
+                | Self::MaxPlus
                 // Self-hosted router: base URL / port varies per user, so the
                 // Settings base-URL field must be editable (not a fixed default).
                 | Self::NineRouter,
@@ -552,6 +560,7 @@ impl ProviderKind {
             Self::XAi => Some("https://api.x.ai/v1"),
             // Groq — the OpenAI-compat surface lives under /openai/v1.
             Self::Groq => Some("https://api.groq.com/openai/v1"),
+            Self::MaxPlus => Some("https://api.maxplus-ai.cc/v1"),
             _ => None,
         }
     }
@@ -637,6 +646,7 @@ impl ProviderKind {
             Self::Moonshot => Some("MOONSHOT_API_KEY"),
             Self::XAi => Some("XAI_API_KEY"),
             Self::Groq => Some("GROQ_API_KEY"),
+            Self::MaxPlus => Some("MAXPLUS_API_KEY"),
         }
     }
 
@@ -743,7 +753,8 @@ impl ProviderKind {
             | Self::Minimax
             | Self::Moonshot
             | Self::XAi
-            | Self::Groq => None,
+            | Self::Groq
+            | Self::MaxPlus => None,
         }
     }
 
@@ -915,6 +926,8 @@ impl ProviderKind {
             // the `groq/` prefix is stripped before the request reaches
             // the OpenAI-compatible upstream at api.groq.com/openai/v1.
             Some(Self::Groq)
+        } else if model.starts_with("maxplus/") {
+            Some(Self::MaxPlus)
         } else {
             None
         }
@@ -2166,6 +2179,29 @@ mod tests {
         );
         assert_eq!(ProviderKind::Minimax.name(), "minimax");
         assert_eq!(ProviderKind::Minimax.default_model(), "minimax/MiniMax-M3");
+    }
+
+    #[test]
+    fn detect_maxplus_prefix_routes_to_maxplus_provider() {
+        assert_eq!(
+            ProviderKind::detect("maxplus/anthropic/claude-opus-5"),
+            Some(ProviderKind::MaxPlus)
+        );
+        assert_eq!(
+            ProviderKind::detect("maxplus/gpt-5"),
+            Some(ProviderKind::MaxPlus)
+        );
+        assert_eq!(ProviderKind::MaxPlus.api_key_env(), Some("MAXPLUS_API_KEY"));
+        assert_eq!(
+            ProviderKind::MaxPlus.endpoint_env(),
+            Some("MAXPLUS_BASE_URL")
+        );
+        assert_eq!(
+            ProviderKind::MaxPlus.default_endpoint(),
+            Some("https://api.maxplus-ai.cc/v1")
+        );
+        assert!(ProviderKind::MaxPlus.endpoint_user_configurable());
+        assert_eq!(ProviderKind::MaxPlus.name(), "maxplus");
     }
 
     #[test]

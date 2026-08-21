@@ -125,6 +125,8 @@ impl AnthropicProvider {
             .model
             .strip_prefix("oa/")
             .or_else(|| req.model.strip_prefix("azure/"))
+            .or_else(|| req.model.strip_prefix("maxplus/anthropic/"))
+            .or_else(|| req.model.strip_prefix("maxplus/"))
             .unwrap_or(&req.model);
 
         let mut body = json!({

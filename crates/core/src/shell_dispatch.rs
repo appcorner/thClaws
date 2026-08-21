@@ -3985,8 +3985,21 @@ async fn switch_model(
     // to the configured outer model + injected fusion tool); it never appears
     // in OpenRouter's live /models list, so skip the membership check for it.
     let is_pseudo_model = resolved == crate::config::FUSION_PLUS_MODEL;
+    let wire_model = if resolved.starts_with("maxplus/") {
+        resolved
+            .strip_prefix("maxplus/anthropic/")
+            .or_else(|| resolved.strip_prefix("maxplus/"))
+            .unwrap_or(&resolved)
+    } else {
+        &resolved
+    };
     if let Ok(models) = new_provider.list_models().await {
-        if !is_pseudo_model && !models.is_empty() && !models.iter().any(|m| m.id == resolved) {
+        if !is_pseudo_model
+            && !models.is_empty()
+            && !models
+                .iter()
+                .any(|m| m.id == resolved || m.id == wire_model)
+        {
             if fallback_to_first {
                 let first = models[0].id.clone();
                 emit(

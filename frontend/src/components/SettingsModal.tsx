@@ -57,6 +57,7 @@ const PROVIDER_LABELS: Record<string, string> = {
   meta: "Meta AI (Muse Spark)",
   xai: "xAI (Grok)",
   groq: "Groq",
+  maxplus: "MaxPlus AI",
   minimax: "MiniMax",
   azure: "Azure AI Foundry",
   vllm: "vLLM (self-hosted)",

@@ -4707,6 +4707,32 @@ pub fn build_provider(config: &AppConfig) -> Result<Arc<dyn Provider>> {
                     .with_strip_model_prefix("groq/"),
             ))
         }
+        ProviderKind::MaxPlus => {
+            let (key, url) = compat_endpoint(
+                config,
+                kind,
+                "MAXPLUS_BASE_URL",
+                "https://api.maxplus-ai.cc/v1",
+                api_key,
+            );
+            let model = config
+                .model
+                .strip_prefix("maxplus/")
+                .unwrap_or(&config.model)
+                .to_ascii_lowercase();
+            if model.starts_with("claude-") || model.starts_with("anthropic/") {
+                let base = url.strip_suffix("/chat/completions").unwrap_or(&url);
+                Ok(Arc::new(AnthropicProvider::new(key).with_base_url(
+                    format!("{}/messages", base.trim_end_matches('/')),
+                )))
+            } else {
+                Ok(Arc::new(
+                    OpenAIProvider::new(key)
+                        .with_base_url(url)
+                        .with_strip_model_prefix("maxplus/"),
+                ))
+            }
+        }
         ProviderKind::AzureAIFoundry => {
             let endpoint = std::env::var("AZURE_AI_FOUNDRY_ENDPOINT").map_err(|_| {
                 Error::Config(
