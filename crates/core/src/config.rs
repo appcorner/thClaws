@@ -377,6 +377,18 @@ pub struct AppConfig {
     /// only consulted when the active model is [`FUSION_PLUS_MODEL`].
     #[serde(default, alias = "openrouterFusion")]
     pub openrouter_fusion: FusionConfig,
+
+    /// Custom font family for the UI. Accepts a CSS font-family value
+    /// (comma-separated list with fallbacks). Default empty → uses
+    /// system fonts (`-apple-system, BlinkMacSystemFont, "Segoe UI", ...`).
+    /// Example: `"'Cascadia Code PL', 'Bai Jamjuree', 'Fira Code'"`.
+    #[serde(default, alias = "fontFamily")]
+    pub font_family: String,
+
+    /// Custom font size for the UI in pixels. Default 0 → uses system
+    /// default (typically 14px). Accepts values 8–32.
+    #[serde(default, alias = "fontSize")]
+    pub font_size: u32,
 }
 
 /// Accepts both the string shorthand and the structured long form so
@@ -635,6 +647,8 @@ impl Default for AppConfig {
             remote_agent_url: None,
             gui_shell: None,
             openrouter_fusion: FusionConfig::default(),
+            font_family: String::new(),
+            font_size: 0,
         }
     }
 }
@@ -934,6 +948,12 @@ pub struct ProjectConfig {
     /// [`AppConfig::openrouter_fusion`]. Absent ⇒ compiled defaults.
     #[serde(rename = "openrouterFusion", skip_serializing_if = "Option::is_none")]
     pub openrouter_fusion: Option<FusionConfig>,
+    /// Custom font family for the UI. See [`AppConfig::font_family`].
+    #[serde(rename = "fontFamily", skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    /// Custom font size for the UI. See [`AppConfig::font_size`].
+    #[serde(rename = "fontSize", skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<u32>,
     /// Workspace layout schema version for this project's `.thclaws/`.
     /// `2` = runtime state consolidated under `.thclaws/state/` (sessions,
     /// team, todos, kms, workflows, …); absent / `< 2` = legacy flat layout
@@ -1020,6 +1040,8 @@ impl Default for ProjectConfig {
             agent: None,
             gui_shell: None,
             openrouter_fusion: None,
+            font_family: None,
+            font_size: None,
             workspace_version: None,
         }
     }
@@ -1752,6 +1774,16 @@ impl ProjectConfig {
     /// for this workspace". Persisted to the project `.thclaws/settings.json`.
     pub fn set_gui_shell_default(&mut self, shell_id: Option<&str>) {
         self.gui_shell = shell_id.map(|id| GuiShellSetting::Shorthand(id.to_string()));
+    }
+
+    /// Set custom font family for the UI. Empty string = system default.
+    pub fn set_font_family(&mut self, family: String) {
+        self.font_family = Some(family);
+    }
+
+    /// Set custom font size for the UI. 0 = system default, 8–32 allowed.
+    pub fn set_font_size(&mut self, size: u32) {
+        self.font_size = Some(size);
     }
 
     /// Load project-level MCP servers. Checks (in order):

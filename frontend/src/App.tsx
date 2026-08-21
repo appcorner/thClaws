@@ -816,6 +816,9 @@ export default function App() {
   // Engine-managed Playwright browser (docs/browser Phase 1). The tab
   // only appears when `browserEnabled` is set in settings.json.
   const [browserEnabled, setBrowserEnabled] = useState(false);
+  // Font customization
+  const [fontFamily, setFontFamily] = useState("");
+  const [fontSize, setFontSize] = useState(0);
   // Mobile-only: the sidebar is an off-canvas drawer below the `sm`
   // breakpoint (toggled by the hamburger in the tab bar). On `sm:`+ it's
   // the normal inline column, so this flag is ignored there.
@@ -839,6 +842,16 @@ export default function App() {
         typeof msg.enabled === "boolean"
       ) {
         setBrowserEnabled(msg.enabled as boolean);
+      } else if (
+        msg.type === "font_config" ||
+        msg.type === "font_config_result"
+      ) {
+        if (typeof msg.fontFamily === "string") {
+          setFontFamily(msg.fontFamily);
+        }
+        if (typeof msg.fontSize === "number") {
+          setFontSize(msg.fontSize);
+        }
       } else if (msg.type === "settings_changed") {
         // Backend re-loaded .thclaws/settings.json (file watcher or
         // explicit `settings_reload` IPC). Re-fetch every settings-
@@ -848,6 +861,7 @@ export default function App() {
         send({ type: "team_enabled_get" });
         send({ type: "shell_tab_enabled_get" });
         send({ type: "browser_status_get" });
+        send({ type: "font_config_get" });
       } else if (msg.type === "initial_state") {
         // #95(c) + #168: the explicit `*_get` requests below race the WS
         // CONNECTING state on first mount in --serve mode — wsSend drops
@@ -871,8 +885,24 @@ export default function App() {
     send({ type: "team_enabled_get" });
     send({ type: "shell_tab_enabled_get" });
     send({ type: "browser_status_get" });
+    send({ type: "font_config_get" });
     return unsub;
   }, []);
+
+  // Apply font customization to root element
+  useEffect(() => {
+    const root = document.documentElement;
+    if (fontFamily) {
+      root.style.setProperty("--font-family", fontFamily);
+    } else {
+      root.style.removeProperty("--font-family");
+    }
+    if (fontSize > 0) {
+      root.style.setProperty("--font-size", `${fontSize}px`);
+    } else {
+      root.style.removeProperty("--font-size");
+    }
+  }, [fontFamily, fontSize]);
 
   const modalOpen =
     showSettings || instructionsScope !== null || modelPicker !== null;

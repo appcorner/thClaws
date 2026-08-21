@@ -5182,6 +5182,42 @@ pub fn handle_ipc(msg: Value, ctx: &IpcContext) -> bool {
                 .send(crate::shared_session::ShellInput::ReloadConfig);
         }
 
+        "font_config_get" => {
+            let cfg = crate::config::AppConfig::load().unwrap_or_default();
+            let payload = serde_json::json!({
+                "type": "font_config",
+                "fontFamily": cfg.font_family,
+                "fontSize": cfg.font_size,
+            });
+            (ctx.dispatch)(payload.to_string());
+        }
+
+        "font_config_set" => {
+            let font_family = msg.get("fontFamily").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let font_size = msg.get("fontSize").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            
+            let mut cfg = crate::config::ProjectConfig::load().unwrap_or_default();
+            cfg.set_font_family(font_family.clone());
+            cfg.set_font_size(font_size);
+            
+            let (ok, error) = match cfg.save() {
+                Ok(()) => (true, String::new()),
+                Err(e) => (false, e.to_string()),
+            };
+            let payload = serde_json::json!({
+                "type": "font_config_result",
+                "fontFamily": font_family,
+                "fontSize": font_size,
+                "ok": ok,
+                "error": error,
+            });
+            (ctx.dispatch)(payload.to_string());
+            let _ = ctx
+                .shared
+                .input_tx
+                .send(crate::shared_session::ShellInput::ReloadConfig);
+        }
+
         // Set (or clear) the workspace default GUI Shell from the picker's
         // "Set as default" button. Writes the `guiShell` shorthand to the
         // project .thclaws/settings.json so this shell auto-opens in the

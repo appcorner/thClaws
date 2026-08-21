@@ -311,6 +311,7 @@ export function SettingsModal({ onClose }: { onClose: () => void }) {
           <CloudSection />
           <AgentIdentitySection />
           <AutoLearnSection />
+          <FontSettingsSection />
 
           {featuredEntries.length > 0 && (
             <div className="flex items-center justify-between mt-2 gap-3">
@@ -1371,6 +1372,116 @@ function AutoLearnSection() {
         </span>
       </label>
       <FlashLine flash={flash} />
+    </div>
+  );
+}
+
+function FontSettingsSection() {
+  const [fontFamily, setFontFamily] = useState("");
+  const [fontSize, setFontSize] = useState(0);
+  const [draft, setDraft] = useState({ fontFamily: "", fontSize: 0 });
+  const [flash, setFlash] = useState<{ ok: boolean; msg: string } | null>(null);
+
+  useEffect(() => {
+    const unsub = subscribe((msg) => {
+      if (msg.type === "font_config" || msg.type === "font_config_result") {
+        const family = typeof msg.fontFamily === "string" ? msg.fontFamily : "";
+        const size = typeof msg.fontSize === "number" ? msg.fontSize : 0;
+        setFontFamily(family);
+        setFontSize(size);
+        setDraft({ fontFamily: family, fontSize: size });
+        if (msg.type === "font_config_result") {
+          if (msg.ok) {
+            setFlash({ ok: true, msg: "Font settings saved" });
+          } else {
+            setFlash({ ok: false, msg: (msg.error as string) || "Save failed" });
+          }
+          setTimeout(() => setFlash(null), 2000);
+        }
+      }
+    });
+    send({ type: "font_config_get" });
+    return unsub;
+  }, []);
+
+  const handleSave = () => {
+    send({
+      type: "font_config_set",
+      fontFamily: draft.fontFamily,
+      fontSize: draft.fontSize,
+    });
+  };
+
+  const unchanged =
+    draft.fontFamily === fontFamily && draft.fontSize === fontSize;
+
+  return (
+    <div
+      className="rounded p-3"
+      style={{ background: "var(--bg-tertiary)", border: "1px solid var(--border)" }}
+    >
+      <div className="flex items-center gap-2 mb-1">
+        <span className="text-xs font-semibold" style={{ color: "var(--text-primary)" }}>
+          Font Customization
+        </span>
+        <span className="text-[10px]" style={{ color: "var(--text-secondary)" }}>
+          project-scope · saved to .thclaws/settings.json
+        </span>
+      </div>
+      <p className="text-xs mb-2" style={{ color: "var(--text-secondary)" }}>
+        Customize the UI font family and size. Changes apply immediately.
+      </p>
+      <div className="flex flex-col gap-2">
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: "var(--text-secondary)" }}>
+            Font Family (CSS value, e.g. "Fira Code, monospace")
+          </label>
+          <input
+            type="text"
+            value={draft.fontFamily}
+            onChange={(e) => setDraft({ ...draft, fontFamily: e.target.value })}
+            placeholder="Leave empty for system default"
+            className="w-full px-2 py-1 text-xs rounded"
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border)",
+              color: "var(--text-primary)",
+            }}
+          />
+        </div>
+        <div>
+          <label className="text-xs mb-1 block" style={{ color: "var(--text-secondary)" }}>
+            Font Size (pixels, 8–32, 0 for default)
+          </label>
+          <input
+            type="number"
+            min="0"
+            max="32"
+            value={draft.fontSize}
+            onChange={(e) => setDraft({ ...draft, fontSize: parseInt(e.target.value) || 0 })}
+            className="w-full px-2 py-1 text-xs rounded"
+            style={{
+              background: "var(--bg-primary)",
+              border: "1px solid var(--border)",
+              color: "var(--text-primary)",
+            }}
+          />
+        </div>
+        <button
+          onClick={handleSave}
+          disabled={unchanged}
+          className="px-3 py-1 text-xs rounded self-start"
+          style={{
+            background: unchanged ? "var(--bg-secondary)" : "var(--accent)",
+            color: unchanged ? "var(--text-secondary)" : "var(--accent-fg)",
+            cursor: unchanged ? "not-allowed" : "pointer",
+            opacity: unchanged ? 0.5 : 1,
+          }}
+        >
+          Save
+        </button>
+      </div>
+      <FlashLine flash={flash ?? undefined} />
     </div>
   );
 }
