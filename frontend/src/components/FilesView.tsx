@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import {
   Folder,
   File,
-  ArrowUp,
+  ChevronDown,
+  ChevronRight,
   Pencil,
   Eye,
   EyeOff,
@@ -18,6 +19,7 @@ import {
   Code2,
   Type,
   ListTree,
+  RefreshCw,
 } from "lucide-react";
 import { send, subscribe } from "../hooks/useIPC";
 import { assetUrl, workspacePrefix } from "../lib/assetUrl";
@@ -94,6 +96,27 @@ type FileEntry = {
   name: string;
   is_dir: boolean;
 };
+
+type FileTree = Record<string, FileEntry[]>;
+
+function childPath(dir: string, name: string): string {
+  return dir === "." ? name : `${dir.replace(/[\\/]$/, "")}/${name}`;
+}
+
+function parentPath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/\/$/, "");
+  const slash = normalized.lastIndexOf("/");
+  return slash > 0 ? normalized.slice(0, slash) : ".";
+}
+
+function displayPath(path: string, rootPath: string | null): string {
+  if (!rootPath || path === rootPath) return ".";
+  const normalizedPath = path.replace(/\\/g, "/");
+  const normalizedRoot = rootPath.replace(/\\/g, "/").replace(/\/$/, "");
+  return normalizedPath.startsWith(`${normalizedRoot}/`)
+    ? normalizedPath.slice(normalizedRoot.length + 1)
+    : path;
+}
 
 interface Props {
   active: boolean;
@@ -190,14 +213,6 @@ function MenuItem({
   );
 }
 
-// Compact path for the explorer header — the viewer navbar already
-// shows the full path. Root stays "."; nested dirs show "../<last>".
-function shortPath(p: string): string {
-  if (p === "." || p === "") return ".";
-  const last = p.split("/").filter(Boolean).pop() ?? p;
-  return p.includes("/") ? `../${last}` : last;
-}
-
 function isMarkdownPath(path: string): boolean {
   // Used to gate the iframe's `srcDoc` branch (vs. the asset-URL fetch
   // branch). Backend-rendered HTML previews — Markdown source files
@@ -287,14 +302,30 @@ function injectBaseHref(html: string, filePath: string): string {
 }
 
 export function FilesView({ active }: Props) {
-  const [currentPath, setCurrentPath] = useState(".");
+  // The project directory is the immutable root of this explorer. Unlike
+  // the former folder-navigation view, selecting a child never moves the
+  // user "into" it or permits walking above this root.
+  const [rootPath, setRootPath] = useState<string | null>(null);
+  const [selectedDir, setSelectedDir] = useState(".");
   // Show dotfile entries (`.thclaws/`, `.claude/`, `.env`, etc.) in
   // the listing. Off by default — the agent workspace usually has
   // dozens of dot-prefixed paths the user doesn't need to see. The
   // toggle persists for the lifetime of the tab (no localStorage —
   // it's a transient view setting, not a preference).
   const [showHidden, setShowHidden] = useState(false);
-  const [entries, setEntries] = useState<FileEntry[]>([]);
+  const [tree, setTree] = useState<FileTree>({});
+  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(
+    () => new Set(),
+  );
+  // Explorer is split into a folder-only tree and the selected folder's file
+  // list. Both dividers are user-resizable so deeply nested projects never
+  // force filenames into a narrow indentation column.
+  const [sidebarWidth, setSidebarWidth] = useState(320);
+  const [treeHeight, setTreeHeight] = useState(260);
+  const explorerRef = useRef<HTMLDivElement>(null);
   // Explorer right-click context menu (null = closed).
   const [explorerMenu, setExplorerMenu] = useState<{ x: number; y: number } | null>(
     null,
@@ -408,11 +439,86 @@ export function FilesView({ active }: Props) {
   // link looks like it flips between the two files.
   const requestedPathRef = useRef<string>("");
 
+  const requestDirectory = useCallback(
+    (path: string) => {
+      setLoadingDirs((current) => new Set(current).add(path));
+      send({ type: "file_list", path, show_hidden: showHidden });
+    },
+    [showHidden],
+  );
+
+  const refreshTree = useCallback(() => {
+    const root = rootPath ?? ".";
+    const paths = new Set([root, ...expandedDirs]);
+    paths.forEach((path) => requestDirectory(path));
+  }, [expandedDirs, requestDirectory, rootPath]);
+
+  const toggleDirectory = useCallback(
+    (path: string) => {
+      setSelectedDir(path);
+      const isExpanded = expandedDirs.has(path);
+      setExpandedDirs((current) => {
+        const next = new Set(current);
+        if (isExpanded) next.delete(path);
+        else next.add(path);
+        return next;
+      });
+      if (!isExpanded && !tree[path]) requestDirectory(path);
+    },
+    [expandedDirs, requestDirectory, tree],
+  );
+
+  const startSidebarResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = sidebarWidth;
+    const onMove = (move: MouseEvent) => {
+      const max = Math.min(640, Math.round(window.innerWidth * 0.45));
+      setSidebarWidth(Math.max(220, Math.min(max, startWidth + move.clientX - startX)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const startTreeResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    const startY = event.clientY;
+    const startHeight = treeHeight;
+    const explorerHeight = explorerRef.current?.getBoundingClientRect().height ?? 520;
+    const onMove = (move: MouseEvent) => {
+      const max = Math.max(140, explorerHeight - 140);
+      setTreeHeight(Math.max(100, Math.min(max, startHeight + move.clientY - startY)));
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
   useEffect(() => {
     const unsub = subscribe((msg) => {
       if (msg.type === "file_tree") {
-        setEntries(msg.entries as FileEntry[]);
-        if (msg.path) setCurrentPath(msg.path as string);
+        // Keep tree keys slash-normalized. The Windows backend may echo a
+        // path with backslashes even when the lazy-load request used `/`.
+        const path = String(msg.path ?? ".").replace(/\\/g, "/");
+        setTree((current) => ({ ...current, [path]: msg.entries as FileEntry[] }));
+        setLoadingDirs((current) => {
+          const next = new Set(current);
+          next.delete(path);
+          return next;
+        });
+        setRootPath((current) => {
+          if (current) return current;
+          setSelectedDir(path);
+          setExpandedDirs(new Set([path]));
+          return path;
+        });
       } else if (msg.type === "file_content") {
         const incomingPath = msg.path as string;
         const incomingContent = msg.content as string;
@@ -478,12 +584,12 @@ export function FilesView({ active }: Props) {
         setTimeout(() => setSaveToast(null), 2500);
       }
     });
-    send({ type: "file_list", path: ".", show_hidden: showHidden });
+    requestDirectory(".");
     return unsub;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Auto-refresh directory listing + preview while tab active.
+  // Auto-refresh the visible tree branches + preview while tab active.
   // Never auto-refresh when user is editing — we'd clobber their work.
   // `themeMode` is a dep so a light/dark swap re-fetches the .md
   // preview with the fresh palette baked into its iframe HTML.
@@ -494,7 +600,7 @@ export function FilesView({ active }: Props) {
     // fires six more renders of the same deck — each one a fresh upload
     // and a fresh charge — before the first one answers.
     const refresh = () => {
-      send({ type: "file_list", path: currentPath, show_hidden: showHidden });
+      refreshTree();
       // Poll the file the pane was last *asked* for, not the one whose
       // content happens to be rendered — between a click and its response
       // those differ, and re-reading the old one flips the pane back to it.
@@ -511,9 +617,9 @@ export function FilesView({ active }: Props) {
   // reference each time), resetting the interval unnecessarily.
   // `showHidden` triggers an immediate refresh when toggled so the
   // listing flips without waiting for the next 2s tick.
-  }, [active, currentPath, preview?.path, mode, themeMode, showHidden, renderPending]);
+  }, [active, refreshTree, preview?.path, mode, themeMode, renderPending]);
 
-  // Drag-and-drop upload into the directory currently shown in the tree.
+  // Drag-and-drop upload into the folder selected in the explorer.
   // Each dropped file is base64-encoded and written via `file_upload`
   // (binary-safe, refuses to clobber). A per-upload self-unsubscribing
   // listener captures the *current* path/showHidden so the listing
@@ -522,14 +628,13 @@ export function FilesView({ active }: Props) {
     (files: FileList) => {
       for (const file of Array.from(files)) {
         const reqId = Date.now() + Math.floor(Math.random() * 100000);
-        const target =
-          currentPath === "." ? file.name : `${currentPath}/${file.name}`;
+        const target = childPath(selectedDir, file.name);
         const unsub = subscribe((msg) => {
           if (msg.type !== "file_upload_result" || msg.id !== reqId) return;
           unsub();
           if (msg.ok) {
             setSaveToast(`uploaded ${file.name}`);
-            send({ type: "file_list", path: currentPath, show_hidden: showHidden });
+            requestDirectory(selectedDir);
           } else {
             setSaveToast(
               `upload failed: ${file.name}${msg.error ? ` — ${msg.error}` : ""}`,
@@ -548,7 +653,7 @@ export function FilesView({ active }: Props) {
           });
       }
     },
-    [currentPath, showHidden],
+    [requestDirectory, selectedDir],
   );
 
   const onTreeDragOver = (e: React.DragEvent) => {
@@ -751,14 +856,18 @@ export function FilesView({ active }: Props) {
           setSaveToast(`deleted ${name}`);
           // Clear the preview if it pointed at the deleted path (or, for a
           // folder, anything inside it).
+          const previewPath = preview?.path.replace(/\\/g, "/");
           if (
-            preview &&
-            (preview.path === path || preview.path.startsWith(`${path}/`))
+            previewPath &&
+            (previewPath === path || previewPath.startsWith(`${path}/`))
           ) {
             setPreview(null);
             requestedPathRef.current = "";
           }
-          send({ type: "file_list", path: currentPath, show_hidden: showHidden });
+          if (selectedDir === path || selectedDir.startsWith(`${path}/`)) {
+            setSelectedDir(rootPath ?? ".");
+          }
+          requestDirectory(parentPath(path));
         } else {
           setSaveToast(
             `delete failed: ${name}${msg.error ? ` — ${msg.error}` : ""}`,
@@ -768,7 +877,7 @@ export function FilesView({ active }: Props) {
       });
       send({ type: "file_delete", id: reqId, path });
     },
-    [currentPath, showHidden, preview],
+    [preview, requestDirectory, rootPath, selectedDir],
   );
 
   // One-shot file download — sends `file_download` with a unique
@@ -814,19 +923,7 @@ export function FilesView({ active }: Props) {
     send({ type: "file_download", id: reqId, path });
   }, []);
 
-  const navigate = (name: string) => {
-    const path = currentPath === "." ? name : `${currentPath}/${name}`;
-    send({ type: "file_list", path, show_hidden: showHidden });
-  };
-
-  const goUp = () => {
-    const parent = currentPath.includes("/")
-      ? currentPath.substring(0, currentPath.lastIndexOf("/"))
-      : ".";
-    send({ type: "file_list", path: parent || ".", show_hidden: showHidden });
-  };
-
-  // Open the new file / folder modal, creating in the current directory.
+  // Open the new file / folder modal, creating in the selected folder.
   const startCreate = (kind: "file" | "folder") => {
     setExplorerMenu(null);
     setCreateName("");
@@ -840,13 +937,13 @@ export function FilesView({ active }: Props) {
     const n = createName.trim();
     if (!n) return setCreateError("name required");
     if (n.includes("/")) return setCreateError("name can't contain '/'");
-    const path = currentPath === "." ? n : `${currentPath}/${n}`;
+    const path = childPath(selectedDir, n);
     setCreating(true);
     setCreateError(null);
     send({ type: createKind === "folder" ? "file_mkdir" : "file_create", path });
   };
 
-  // Resolve the create round-trip; refresh the listing on success.
+  // Resolve the create round-trip; refresh the selected tree branch on success.
   useEffect(() => {
     if (createKind === null) return;
     const wanted =
@@ -857,13 +954,13 @@ export function FilesView({ active }: Props) {
       if (msg.ok) {
         setCreateKind(null);
         setCreateName("");
-        send({ type: "file_list", path: currentPath, show_hidden: showHidden });
+        requestDirectory(selectedDir);
       } else {
         setCreateError((msg.error as string) ?? "create failed");
       }
     });
     return unsub;
-  }, [createKind, currentPath]);
+  }, [createKind, requestDirectory, selectedDir]);
 
   // Open the rename modal for a tree entry, prefilled with its name.
   const startRename = (path: string, name: string, isDir: boolean) => {
@@ -897,19 +994,23 @@ export function FilesView({ active }: Props) {
       if (msg.ok) {
         // Clear the preview if it pointed at the renamed path (or inside a
         // renamed folder) — its old path no longer exists.
+        const previewPath = preview?.path.replace(/\\/g, "/");
         if (
-          preview &&
-          (preview.path === target.path ||
-            preview.path.startsWith(`${target.path}/`))
+          previewPath &&
+          (previewPath === target.path ||
+            previewPath.startsWith(`${target.path}/`))
         ) {
           setPreview(null);
-            requestedPathRef.current = "";
+          requestedPathRef.current = "";
+        }
+        if (selectedDir === target.path || selectedDir.startsWith(`${target.path}/`)) {
+          setSelectedDir(rootPath ?? parentPath(target.path));
         }
         setRenameTarget(null);
         setRenameName("");
         setSaveToast(`renamed to ${n}`);
         setTimeout(() => setSaveToast(null), 2500);
-        send({ type: "file_list", path: currentPath, show_hidden: showHidden });
+        requestDirectory(parentPath(target.path));
       } else {
         setRenameError((msg.error as string) ?? "rename failed");
       }
@@ -923,8 +1024,7 @@ export function FilesView({ active }: Props) {
     send({ type: "file_read", path, mode: "preview", theme: themeMode });
   }, [themeMode]);
 
-  const onSidebarClick = async (name: string) => {
-    const path = currentPath === "." ? name : `${currentPath}/${name}`;
+  const onSidebarClick = async (path: string) => {
     if (mode === "edit" && editorDirty) {
       const ok = await platformConfirm({
         title: "Unsaved changes",
@@ -940,8 +1040,8 @@ export function FilesView({ active }: Props) {
 
   // Open a file the user clicked *inside* a rendered markdown preview (an
   // `index.md` row, a relative link between chapters). Same unsaved-edit
-  // guard as clicking the tree, plus it walks the tree to the file's folder
-  // so the sidebar shows where you landed.
+  // guard as clicking the tree. The explorer remains rooted at the project
+  // instead of navigating away from the open branches.
   const openLinkedFile = useCallback(
     async (path: string) => {
       if (mode === "edit" && editorDirty) {
@@ -954,14 +1054,9 @@ export function FilesView({ active }: Props) {
         if (!ok) return;
         setEditorDirty(false);
       }
-      const slash = path.lastIndexOf("/");
-      const dir = slash > 0 ? path.slice(0, slash) : ".";
-      if (dir !== currentPath) {
-        send({ type: "file_list", path: dir, show_hidden: showHidden });
-      }
       openFile(path);
     },
-    [mode, editorDirty, preview, currentPath, showHidden, openFile],
+    [mode, editorDirty, preview, openFile],
   );
 
   // The click handler is attached to the *iframe's* document from out here,
@@ -1297,17 +1392,100 @@ export function FilesView({ active }: Props) {
   const hasSyntaxPreview =
     preview && SYNTAX_PREVIEW.has(extOf(preview.path));
 
+  const renderTreeBranch = (dir: string, depth: number): React.ReactNode =>
+    (tree[dir] ?? []).filter((entry) => entry.is_dir).map((entry) => {
+      const path = childPath(dir, entry.name);
+      const expanded = entry.is_dir && expandedDirs.has(path);
+      const selected = entry.is_dir
+        ? selectedDir === path
+        : preview?.path.replace(/\\/g, "/") === path.replace(/\\/g, "/");
+      return (
+        <div key={path}>
+          <div
+            className="flex items-center min-w-0 rounded text-xs"
+            style={{
+              color: "var(--text-primary)",
+              background: selected ? "var(--bg-tertiary, rgba(255,255,255,0.06))" : undefined,
+              paddingLeft: 6 + depth * 14,
+            }}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setExplorerMenu(null);
+              setEntryMenu({
+                x: e.clientX,
+                y: e.clientY,
+                path,
+                name: entry.name,
+                isDir: entry.is_dir,
+              });
+            }}
+          >
+            {entry.is_dir ? (
+              <button
+                type="button"
+                aria-label={`${expanded ? "Collapse" : "Expand"} ${entry.name}`}
+                aria-expanded={expanded}
+                className="p-0.5 shrink-0 rounded hover:bg-white/10"
+                onClick={() => toggleDirectory(path)}
+              >
+                {expanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+              </button>
+            ) : (
+              <span className="w-5 shrink-0" />
+            )}
+            <button
+              type="button"
+              aria-current={selected ? "true" : undefined}
+              className="flex items-center gap-1.5 min-w-0 flex-1 px-1 py-1 text-left rounded hover:bg-white/5"
+              onClick={() => {
+                if (entry.is_dir) setSelectedDir(path);
+                else void onSidebarClick(path);
+              }}
+              onDoubleClick={() => {
+                if (entry.is_dir) toggleDirectory(path);
+              }}
+            >
+              {entry.is_dir ? (
+                <Folder size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />
+              ) : (
+                <File size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+              )}
+              <span className="truncate">{entry.name}</span>
+            </button>
+          </div>
+          {entry.is_dir && expanded && (
+            loadingDirs.has(path) && !tree[path] ? (
+              <div
+                className="text-[10px] font-mono py-1"
+                style={{ color: "var(--text-secondary)", paddingLeft: 25 + depth * 14 }}
+              >
+                Loading…
+              </div>
+            ) : (
+              renderTreeBranch(path, depth + 1)
+            )
+          )}
+        </div>
+      );
+    });
+
+  const rootName = rootPath?.split(/[\\/]/).filter(Boolean).at(-1) ?? "Project";
+  const rootExpanded = !!rootPath && expandedDirs.has(rootPath);
+
 
   return (
     <div
       className="flex flex-col sm:flex-row h-full"
       style={{ background: "var(--bg-primary)" }}
     >
-      {/* Tree panel — full-width strip on top below `sm` (capped height so
-          the editor stays visible), fixed-width left column at `sm:`+. */}
+      {/* Explorer: folders establish location; files stay in a separate list
+          so their names never inherit deep tree indentation. */}
       <div
-        className="w-full sm:w-64 max-sm:max-h-[38%] overflow-y-auto border-b sm:border-b-0 sm:border-r shrink-0 flex flex-col"
+        ref={explorerRef}
+        className="relative w-full max-w-full max-sm:max-h-[45%] sm:h-full overflow-hidden border-b sm:border-b-0 sm:border-r shrink-0 flex flex-col"
         style={{
+          width: sidebarWidth,
           borderColor: dragActive ? "var(--accent)" : "var(--border)",
           ...(dragActive
             ? {
@@ -1329,16 +1507,16 @@ export function FilesView({ active }: Props) {
             color: "var(--text-secondary)",
           }}
         >
-          <button
-            onClick={goUp}
-            className="p-0.5 rounded hover:bg-white/10"
-            title="Go up"
-          >
-            <ArrowUp size={12} />
-          </button>
-          <span className="truncate flex-1" title={currentPath}>
-            {shortPath(currentPath)}
+          <span className="truncate flex-1" title={rootPath ?? "Loading project directory"}>
+            Explorer
           </span>
+          <button
+            onClick={refreshTree}
+            className="p-0.5 rounded hover:bg-white/10 shrink-0"
+            title="Refresh expanded folders"
+          >
+            <RefreshCw size={12} />
+          </button>
           <button
             onClick={() => setShowHidden((v) => !v)}
             className="p-0.5 rounded hover:bg-white/10 shrink-0"
@@ -1354,103 +1532,156 @@ export function FilesView({ active }: Props) {
           <button
             onClick={() => startCreate("file")}
             className="p-0.5 rounded hover:bg-white/10 shrink-0"
-            title={`New file in ${currentPath}`}
+            title={`New file in ${displayPath(selectedDir, rootPath)}`}
           >
             <FilePlus size={12} />
           </button>
           <button
             onClick={() => startCreate("folder")}
             className="p-0.5 rounded hover:bg-white/10 shrink-0"
-            title={`New folder in ${currentPath}`}
+            title={`New folder in ${displayPath(selectedDir, rootPath)}`}
           >
             <FolderPlus size={12} />
           </button>
         </div>
 
-        <div
-          className="overflow-y-auto flex-1 p-1"
-          onContextMenu={(e) => {
-            e.preventDefault();
-            setExplorerMenu({ x: e.clientX, y: e.clientY });
-          }}
-        >
-          {dragActive && (
+        <div className="flex flex-col flex-1 min-h-0">
+          <section className="flex flex-col min-h-[100px]" style={{ height: treeHeight }}>
             <div
-              className="text-[10px] font-mono px-2 py-1 mb-1 rounded text-center"
-              style={{ background: "var(--accent)", color: "#fff" }}
+              className="px-2 py-1 border-b text-[10px] font-mono shrink-0"
+              style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
             >
-              Drop to upload to {shortPath(currentPath)}
+              Folders
             </div>
-          )}
-          {entries.length === 0 ? (
-            <div className="text-xs p-2" style={{ color: "var(--text-secondary)" }}>
-              Empty directory
-            </div>
-          ) : (
-            entries.map((entry) => {
-              // Same path composition as openFile() so the comparison
-              // matches whatever the preview pane currently points at.
-              // Directories never get the selection mark — they
-              // navigate instead of preview, so highlighting one
-              // would lie about which file is open.
-              const entryPath =
-                currentPath === "." ? entry.name : `${currentPath}/${entry.name}`;
-              const isSelected = !entry.is_dir && preview?.path === entryPath;
-              return (
-                <button
-                  key={entry.name}
-                  aria-current={isSelected ? "true" : undefined}
-                  className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-xs text-left"
-                  style={{
-                    // Text + icon colour stay theme-default for both
-                    // states — readability shouldn't depend on theme
-                    // contrast against an accent fill.
-                    color: "var(--text-primary)",
-                    // Selection mark is just a faint background fill
-                    // — same shape hover uses, slightly darker. Drops
-                    // the left bar / accent text / bold from the
-                    // previous pass; that combo read as a "click me"
-                    // CTA rather than a passive indicator.
-                    background: isSelected
-                      ? "var(--bg-tertiary, rgba(255,255,255,0.06))"
-                      : undefined,
-                    paddingLeft: 8,
-                  }}
-                  onMouseEnter={(e) => {
-                    if (!isSelected) e.currentTarget.style.background = "rgba(255,255,255,0.05)";
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!isSelected) e.currentTarget.style.background = "";
-                  }}
-                  onClick={() =>
-                    entry.is_dir ? navigate(entry.name) : onSidebarClick(entry.name)
-                  }
-                  onContextMenu={(e) => {
-                    // Per-entry menu — close the explorer-level
-                    // "new file/folder" one if it was somehow open.
-                    e.preventDefault();
-                    e.stopPropagation();
-                    setExplorerMenu(null);
-                    setEntryMenu({
-                      x: e.clientX,
-                      y: e.clientY,
-                      path: entryPath,
-                      name: entry.name,
-                      isDir: entry.is_dir,
-                    });
-                  }}
-                >
-                  {entry.is_dir ? (
-                    <Folder size={13} style={{ color: "var(--accent)", flexShrink: 0 }} />
-                  ) : (
-                    <File size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+            <div
+              className="overflow-y-auto flex-1 p-1"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setExplorerMenu({ x: e.clientX, y: e.clientY });
+              }}
+            >
+              {!rootPath ? (
+                <div className="text-xs p-2" style={{ color: "var(--text-secondary)" }}>
+                  Loading project…
+                </div>
+              ) : (
+                <>
+                  <div
+                    className="flex items-center min-w-0 rounded text-xs"
+                    style={{
+                      color: "var(--text-primary)",
+                      background: selectedDir === rootPath
+                        ? "var(--bg-tertiary, rgba(255,255,255,0.06))"
+                        : undefined,
+                    }}
+                  >
+                    <button
+                      type="button"
+                      aria-label={`${rootExpanded ? "Collapse" : "Expand"} ${rootName}`}
+                      aria-expanded={rootExpanded}
+                      className="p-0.5 shrink-0 rounded hover:bg-white/10"
+                      onClick={() => toggleDirectory(rootPath)}
+                    >
+                      {rootExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                    </button>
+                    <button
+                      type="button"
+                      className="flex items-center gap-1.5 min-w-0 flex-1 px-1 py-1 text-left rounded hover:bg-white/5"
+                      onClick={() => setSelectedDir(rootPath)}
+                      onDoubleClick={() => toggleDirectory(rootPath)}
+                    >
+                      <Folder size={14} style={{ color: "var(--accent)", flexShrink: 0 }} />
+                      <span className="truncate font-medium" title={rootName}>{rootName}</span>
+                    </button>
+                  </div>
+                  {rootExpanded && (
+                    loadingDirs.has(rootPath) && !tree[rootPath] ? (
+                      <div className="text-[10px] font-mono py-1 pl-6" style={{ color: "var(--text-secondary)" }}>
+                        Loading…
+                      </div>
+                    ) : (
+                      renderTreeBranch(rootPath, 1)
+                    )
                   )}
-                  <span className="truncate">{entry.name}</span>
-                </button>
-              );
-            })
-          )}
+                </>
+              )}
+            </div>
+          </section>
+
+          <div
+            role="separator"
+            aria-orientation="horizontal"
+            className="h-1.5 shrink-0 cursor-row-resize border-y hover:bg-white/10"
+            style={{ borderColor: "var(--border)" }}
+            onMouseDown={startTreeResize}
+            title="Drag to resize folders and files"
+          />
+
+          <section className="flex flex-col flex-1 min-h-[100px]">
+            <div
+              className="flex items-center px-2 py-1 border-b text-[10px] font-mono shrink-0"
+              style={{ borderColor: "var(--border)", color: "var(--text-secondary)" }}
+            >
+              <span className="truncate" title={selectedDir}>Files in: {displayPath(selectedDir, rootPath)}</span>
+            </div>
+            <div
+              className="overflow-y-auto flex-1 p-1"
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setExplorerMenu({ x: e.clientX, y: e.clientY });
+              }}
+            >
+              {dragActive && (
+                <div
+                  className="text-[10px] font-mono px-2 py-1 mb-1 rounded text-center"
+                  style={{ background: "var(--accent)", color: "#fff" }}
+                >
+                  Drop to upload to {displayPath(selectedDir, rootPath)}
+                </div>
+              )}
+              {(tree[selectedDir] ?? []).filter((entry) => !entry.is_dir).length === 0 ? (
+                <div className="text-xs p-2" style={{ color: "var(--text-secondary)" }}>
+                  No files in this folder
+                </div>
+              ) : (
+                (tree[selectedDir] ?? []).filter((entry) => !entry.is_dir).map((entry) => {
+                  const path = childPath(selectedDir, entry.name);
+                  const selected = preview?.path.replace(/\\/g, "/") === path.replace(/\\/g, "/");
+                  return (
+                    <button
+                      key={path}
+                      type="button"
+                      aria-current={selected ? "true" : undefined}
+                      className="flex items-center gap-1.5 w-full px-2 py-1 rounded text-xs text-left hover:bg-white/5"
+                      style={{
+                        color: "var(--text-primary)",
+                        background: selected ? "var(--bg-tertiary, rgba(255,255,255,0.06))" : undefined,
+                      }}
+                      onClick={() => void onSidebarClick(path)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setExplorerMenu(null);
+                        setEntryMenu({ x: e.clientX, y: e.clientY, path, name: entry.name, isDir: false });
+                      }}
+                      title={entry.name}
+                    >
+                      <File size={13} style={{ color: "var(--text-secondary)", flexShrink: 0 }} />
+                      <span className="truncate">{entry.name}</span>
+                    </button>
+                  );
+                })
+              )}
+            </div>
+          </section>
         </div>
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          className="hidden sm:block absolute right-0 top-0 h-full w-1 cursor-col-resize hover:bg-white/10"
+          onMouseDown={startSidebarResize}
+          title="Drag to resize Explorer"
+        />
       </div>
 
       {/* Preview / editor panel */}
@@ -1936,7 +2167,7 @@ export function FilesView({ active }: Props) {
             >
               <span style={{ color: "var(--accent)" }}>●</span>
               <span>
-                New {createKind} in {currentPath}
+                New {createKind} in {displayPath(selectedDir, rootPath)}
               </span>
             </div>
             <div className="px-4 py-3 space-y-2 text-xs">
