@@ -1408,7 +1408,7 @@ export function ChatView({ active, modalOpen }: Props) {
                           key={t.id}
                           className="flex items-baseline gap-2"
                           style={{
-                            fontSize: "11px",
+                            fontSize: "calc(var(--font-scale, 1) * 11px)",
                             lineHeight: "1.5",
                           }}
                         >
@@ -1417,7 +1417,7 @@ export function ChatView({ active, modalOpen }: Props) {
                               color: colorForStatus,
                               fontFamily:
                                 "Menlo, Monaco, 'Courier New', monospace",
-                              fontSize: "11px",
+                              fontSize: "calc(var(--font-scale, 1) * 11px)",
                             }}
                           >
                             {glyphForStatus}
@@ -1504,7 +1504,9 @@ export function ChatView({ active, modalOpen }: Props) {
                 fontFamily: isSystem
                   ? "Menlo, Monaco, 'Courier New', monospace"
                   : "inherit",
-                fontSize: isSystem ? "12px" : "14px",
+                fontSize: isSystem 
+                  ? "calc(var(--font-scale, 1) * 12px)" 
+                  : "calc(var(--font-scale, 1) * 14px)",
               }}
             >
               {isAssistant && msg.thinking && (
@@ -1520,7 +1522,7 @@ export function ChatView({ active, modalOpen }: Props) {
                   style={{
                     borderColor: "var(--border, #2a2a2a)",
                     background: "var(--surface-1, rgba(255,255,255,0.03))",
-                    fontSize: "12px",
+                    fontSize: "calc(var(--font-scale, 1) * 12px)",
                     color: "var(--text-secondary)",
                     fontStyle: "italic",
                   }}

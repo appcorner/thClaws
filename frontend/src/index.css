@@ -27,6 +27,7 @@
   color-scheme: dark;
   --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Roboto", "Helvetica Neue", Arial, sans-serif;
   --font-size: 14px;
+  --font-scale: 1;
   --bg-primary: #0a0a0a;
   --bg-secondary: #111;
   --bg-tertiary: #1a1a1a;
@@ -98,6 +99,9 @@ html, body, #root {
    so dark and light modes both look right. Margins are deliberately
    tight — chat bubbles have their own outer padding, so the first
    block element should hug the top edge. */
+.markdown-body {
+  font-size: calc(var(--font-scale) * 1em);
+}
 .markdown-body > :first-child { margin-top: 0; }
 .markdown-body > :last-child { margin-bottom: 0; }
 .markdown-body p { margin: 0.4em 0; line-height: 1.5; }
@@ -111,12 +115,12 @@ html, body, #root {
   line-height: 1.25;
   font-weight: 600;
 }
-.markdown-body h1 { font-size: 1.4em; }
-.markdown-body h2 { font-size: 1.25em; }
-.markdown-body h3 { font-size: 1.1em; }
-.markdown-body h4 { font-size: 1em; }
+.markdown-body h1 { font-size: calc(var(--font-scale) * 1.4em); }
+.markdown-body h2 { font-size: calc(var(--font-scale) * 1.25em); }
+.markdown-body h3 { font-size: calc(var(--font-scale) * 1.1em); }
+.markdown-body h4 { font-size: calc(var(--font-scale) * 1em); }
 .markdown-body h5,
-.markdown-body h6 { font-size: 0.95em; color: var(--text-secondary); }
+.markdown-body h6 { font-size: calc(var(--font-scale) * 0.95em); color: var(--text-secondary); }
 .markdown-body ul,
 .markdown-body ol {
   margin: 0.4em 0;
@@ -146,7 +150,7 @@ html, body, #root {
   padding: 0.12em 0.32em;
   border-radius: 3px;
   font-family: Menlo, Monaco, "Courier New", monospace;
-  font-size: 0.9em;
+  font-size: calc(var(--font-scale) * 0.9em);
 }
 .markdown-body pre {
   background: var(--bg-tertiary);
@@ -155,7 +159,7 @@ html, body, #root {
   padding: 0.7em 0.9em;
   margin: 0.6em 0;
   overflow-x: auto;
-  font-size: 0.85em;
+  font-size: calc(var(--font-scale) * 0.85em);
   line-height: 1.45;
 }
 .markdown-body pre code {

@@ -892,15 +892,22 @@ export default function App() {
   // Apply font customization to root element
   useEffect(() => {
     const root = document.documentElement;
+    const baseFontSize = 14; // default base size
+    
     if (fontFamily) {
       root.style.setProperty("--font-family", fontFamily);
     } else {
       root.style.removeProperty("--font-family");
     }
+    
     if (fontSize > 0) {
       root.style.setProperty("--font-size", `${fontSize}px`);
+      // คำนวณ scale factor สำหรับ chat content
+      const scale = fontSize / baseFontSize;
+      root.style.setProperty("--font-scale", scale.toString());
     } else {
       root.style.removeProperty("--font-size");
+      root.style.removeProperty("--font-scale");
     }
   }, [fontFamily, fontSize]);
 
